@@ -31,7 +31,7 @@
 namespace swoole {
 namespace coroutine {
 
-enum Socket::TimeoutType Socket::timeout_type_list[4] = { TIMEOUT_DNS, TIMEOUT_CONNECT, TIMEOUT_READ, TIMEOUT_WRITE };
+enum Socket::TimeoutType Socket::timeout_type_list[4] = {TIMEOUT_DNS, TIMEOUT_CONNECT, TIMEOUT_READ, TIMEOUT_WRITE};
 
 void Socket::timer_callback(Timer *timer, TimerNode *tnode) {
     Socket *socket = (Socket *) tnode->data;
@@ -124,6 +124,9 @@ bool Socket::add_event(const enum swEvent_type event) {
 bool Socket::wait_event(const enum swEvent_type event, const void **__buf, size_t __n) {
     enum swEvent_type added_event = event;
     Coroutine *co = Coroutine::get_current_safe();
+    if (!co) {
+        return false;
+    }
 
     // clear the last errCode
     set_err(0);
@@ -156,8 +159,7 @@ bool Socket::wait_event(const enum swEvent_type event, const void **__buf, size_
         read_co = co;
         read_co->yield();
         read_co = nullptr;
-    } else  // if (event == SW_EVENT_WRITE)
-    {
+    } else if (event == SW_EVENT_WRITE) {
         if (sw_unlikely(!zero_copy && __n > 0 && *__buf != get_write_buffer()->str)) {
             write_buffer->clear();
             if (write_buffer->append((const char *) *__buf, __n) != SW_OK) {
@@ -169,6 +171,9 @@ bool Socket::wait_event(const enum swEvent_type event, const void **__buf, size_
         write_co = co;
         write_co->yield();
         write_co = nullptr;
+    } else {
+        assert(0);
+        return false;
     }
 _failed:
 #ifdef SW_USE_OPENSSL
@@ -218,7 +223,8 @@ bool Socket::socks5_handshake() {
         return false;
     }
     if (method != ctx->method) {
-        swoole_error_log(SW_LOG_NOTICE, SW_ERROR_SOCKS5_UNSUPPORT_METHOD, "SOCKS authentication method is not supported");
+        swoole_error_log(
+            SW_LOG_NOTICE, SW_ERROR_SOCKS5_UNSUPPORT_METHOD, "SOCKS authentication method is not supported");
         return false;
     }
     // authentication
@@ -312,8 +318,10 @@ bool Socket::socks5_handshake() {
         ctx->state = SW_SOCKS5_STATE_READY;
         return true;
     } else {
-        swoole_error_log(
-            SW_LOG_NOTICE, SW_ERROR_SOCKS5_SERVER_ERROR, "Socks5 server error, reason: %s", Socks5Proxy::strerror(result));
+        swoole_error_log(SW_LOG_NOTICE,
+                         SW_ERROR_SOCKS5_SERVER_ERROR,
+                         "Socks5 server error, reason: %s",
+                         Socks5Proxy::strerror(result));
         return false;
     }
 }
@@ -342,16 +350,7 @@ bool Socket::http_proxy_handshake() {
     };
 
     if (!http_proxy->password.empty()) {
-        char auth_buf[256];
-        char encode_buf[512];
-        n = sw_snprintf(auth_buf,
-                        sizeof(auth_buf),
-                        "%.*s:%.*s",
-                        (int) http_proxy->username.length(),
-                        http_proxy->username.c_str(),
-                        (int) http_proxy->password.length(),
-                        http_proxy->password.c_str());
-        base64_encode((unsigned char *) auth_buf, n, encode_buf);
+        auto auth_str = http_proxy->get_auth_str();
         n = sw_snprintf(send_buffer->str,
                         send_buffer->size,
                         HTTP_PROXY_FMT "Proxy-Authorization: Basic %s\r\n\r\n",
@@ -361,7 +360,7 @@ bool Socket::http_proxy_handshake() {
                         host_len,
                         host,
                         http_proxy->target_port,
-                        encode_buf);
+                        auth_str.c_str());
     } else {
         n = sw_snprintf(send_buffer->str,
                         send_buffer->size,
@@ -442,8 +441,8 @@ bool Socket::http_proxy_handshake() {
 
     if (!ret) {
         set_err(SW_ERROR_HTTP_PROXY_BAD_RESPONSE,
-                std::string("wrong http_proxy response received, \n[Request]: ") + send_buffer->to_std_string() + "\n[Response]: "
-                        + std::string(buf, len));
+                std::string("wrong http_proxy response received, \n[Request]: ") + send_buffer->to_std_string() +
+                    "\n[Response]: " + std::string(buf, len));
     }
 
     return ret;
@@ -715,6 +714,7 @@ bool Socket::connect(std::string _host, int _port, int flags) {
     if (connect(_target_addr, socket->info.len) == false) {
         return false;
     }
+
     // socks5 proxy
     if (socks5_proxy && socks5_handshake() == false) {
         if (errCode == 0) {
@@ -1618,7 +1618,7 @@ ssize_t Socket::recv_packet(double timeout) {
 
 bool Socket::shutdown(int __how) {
     set_err(0);
-    if (!is_connect() || (__how == SHUT_RD && shutdown_read) || (__how == SHUT_WR && shutdown_write)) {
+    if (!is_connected() || (__how == SHUT_RD && shutdown_read) || (__how == SHUT_WR && shutdown_write)) {
         errno = ENOTCONN;
     } else {
 #ifdef SW_USE_OPENSSL
@@ -1762,4 +1762,19 @@ Socket::~Socket() {
 }
 
 }  // namespace coroutine
+
+std::string HttpProxy::get_auth_str() {
+    char auth_buf[256];
+    char encode_buf[512];
+    size_t n = sw_snprintf(auth_buf,
+                           sizeof(auth_buf),
+                           "%.*s:%.*s",
+                           (int) username.length(),
+                           username.c_str(),
+                           (int) password.length(),
+                           password.c_str());
+    base64_encode((unsigned char *) auth_buf, n, encode_buf);
+    return std::string(encode_buf);
+}
+
 }  // namespace swoole
