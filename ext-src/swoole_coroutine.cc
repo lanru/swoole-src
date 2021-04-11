@@ -149,6 +149,7 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_swoole_coroutine_getElapsed, 0, 0, 0)
     ZEND_ARG_INFO(0, cid)
 ZEND_END_ARG_INFO()
 
+// 而这个schedule线程我们可以认为它是一个负责调用的一个线程。它设置EG(vm_interrupt)的值为1。设置完之后，当虚拟机检查到这个值为1的时候，就会去执行new_interrupt_function函数，从而实现了yield协程
 _Noreturn void schedule()
 {
     while (1)
@@ -158,6 +159,7 @@ _Noreturn void schedule()
     }
 }
 
+// 这个函数的作用是创建一个线程，这个线程的执行体是schedule函数
 static void create_scheduler_thread()
 {
     pthread_t pidt;
@@ -169,6 +171,7 @@ static void create_scheduler_thread()
 
 static void new_interrupt_function(zend_execute_data *execute_data)
 {
+    // 我们的这个函数'模拟'了yield协程的过程。
     php_printf("yield coroutine\n");
     if (orig_interrupt_function)
     {
@@ -179,6 +182,7 @@ static void new_interrupt_function(zend_execute_data *execute_data)
 void init()
 {
     orig_interrupt_function = zend_interrupt_function;
+// zend_interrupt_function的作用是在虚拟机中断发生的时候，会去执行的函数。并且，zend_interrupt_function是PHP内核定义的一个函数指针。
     zend_interrupt_function = new_interrupt_function;
 }
 
