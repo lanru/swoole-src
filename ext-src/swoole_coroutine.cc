@@ -149,8 +149,47 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_swoole_coroutine_getElapsed, 0, 0, 0)
     ZEND_ARG_INFO(0, cid)
 ZEND_END_ARG_INFO()
 
+_Noreturn void schedule()
+{
+    while (1)
+    {
+        EG(vm_interrupt) = 1;
+        usleep(5000);
+    }
+}
+
+static void create_scheduler_thread()
+{
+    pthread_t pidt;
+    if (pthread_create(&pidt, NULL, (void * (*)(void *)) schedule, NULL) < 0)
+    {
+        php_printf("pthread_create[PHPCoroutine Scheduler] failed");
+    }
+}
+
+static void new_interrupt_function(zend_execute_data *execute_data)
+{
+    php_printf("yield coroutine\n");
+    if (orig_interrupt_function)
+    {
+        orig_interrupt_function(execute_data);
+    }
+}
+
+void init()
+{
+    orig_interrupt_function = zend_interrupt_function;
+    zend_interrupt_function = new_interrupt_function;
+}
+
+PHP_FUNCTION(swoole_coroutine_start_interrupt) {
+    init();
+    create_scheduler_thread();
+};
+
 static const zend_function_entry swoole_coroutine_methods[] =
 {
+    ZEND_FENTRY(start_interrupt, ZEND_FN(swoole_coroutine_start_interrupt), arginfo_swoole_coroutine_void, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     /**
      * Coroutine Core API
      */

@@ -410,7 +410,7 @@ static void fatal_error(int code, const char *format, ...) {
 
 /* {{{ PHP_MINIT_FUNCTION
  */
-PHP_MINIT_FUNCTION(swoole) {
+PHP_MINIT_FUNCTION(swoole) {auto
     ZEND_INIT_MODULE_GLOBALS(swoole, php_swoole_init_globals, nullptr);
     REGISTER_INI_ENTRIES();
 
